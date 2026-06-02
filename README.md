@@ -1,4 +1,4 @@
-# Visualización de datos - PEC 3
+# Visualización de datos - Práctica
 ## Autor: Virgilio Salcedo Polo
 ### Asignatura: Visualización de datos
 
