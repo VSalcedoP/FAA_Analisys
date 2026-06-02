@@ -1,0 +1,385 @@
+---
+title: "FAA Incidents data clean-up"
+author: "Virgilio Salcedo Polo"
+date: "Mayo 2026"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load packages
+
+```{r packages}
+if(!require(tidyverse)){install.packages("tidyverse")}; library("tidyverse")
+if(!require(lubridate)){install.packages("lubridate")}; library("lubridate")
+if(!require(janitor)){install.packages("janitor")}; library("janitor")
+if(!require(stringr)){install.packages("stringr")}; library("stringr")
+if(!require(readr)){install.packages("readr")}; library("readr")
+if(!require(ggplot2)){install.packages("ggplot2")}; library("ggplot2")
+if(!require(scales)){install.packages("scales")}; library("scales")
+```
+
+Cargamos los datos
+
+```{r load data}
+df_faa_raw=read.csv("../data_raw/faa_incidents_data.csv")
+```
+# Exploración inicial
+
+```{r}
+print ("Vistazo general")
+glimpse(df_faa_raw)
+print("Fatalities")
+summary(df_faa_raw$total_fatalities)
+```
+
+# Realizamos la limpieza
+<ul>
+<li>Las columnas x y x_1 no solo están en blanco sino que no aparecen en la descripción por lo que serán eliminadas.
+</li>
+<li>Convertimos vacios a NA.
+</li>
+<li>Convertimos la fecha a formato date y la separamos en año y mes.
+</li>
+
+<ul>
+
+```{r Limpieza}
+df_faa_clean <- df_faa_raw %>%
+  
+  clean_names() %>%
+  
+  select(-x, -x_1) %>%
+  
+  mutate( 
+    across( 
+      where(is.character),
+      ~ na_if(str_trim(.x), "")
+      )
+    ) %>%
+  
+  mutate(
+    local_event_date = dmy(local_event_date)
+    ) %>%
+  
+  mutate( 
+    year = year(local_event_date), 
+    month = month(local_event_date, label = TRUE)
+    )
+```
+
+Creamos algunas variables derivadas que serán útiles para la visualziación.<br>
+***** Describir ******
+
+```{r variables nuevas}
+df_faa_clean <- df_faa_clean %>%
+  mutate( 
+    fatal_event = total_fatalities > 0,
+
+    injury_event = total_injuries > 0,
+
+    severity_level = case_when( 
+      total_fatalities > 0 ~ "Fatal",
+      total_injuries > 0 ~ "Con lesiones",
+      TRUE ~ "Sin lesiones" ),
+
+    damage_level = case_when(
+      aircraft_damage %in% c("DESTROYED") ~ "Destruida",
+      aircraft_damage %in% c("SUBSTANTIAL") ~ "Daño sustancial",
+      aircraft_damage %in% c("MINOR") ~ "Daño menor",
+      aircraft_damage %in% c("NONE") ~ "Sin daños",
+      aircraft_damage %in% c("UNKNOWN") ~ "No reportado"),
+    
+    pic_experience_level = case_when( 
+      pic_flight_time_total_hrs < 370 ~ "Muy baja",
+      pic_flight_time_total_hrs >= 370 & pic_flight_time_total_hrs < 1500 ~ "Media",
+      pic_flight_time_total_hrs >= 1500 & pic_flight_time_total_hrs < 5000 ~ "Alta",
+      pic_flight_time_total_hrs >= 5000 ~ "Muy alta", TRUE ~ NA_character_ 
+      ),
+    pic_experience_level_make_model = case_when( 
+      pic_flight_time_total_make_model < 150 ~ "Muy baja",
+      pic_flight_time_total_make_model >= 150 & pic_flight_time_total_make_model < 700 ~ "Media",
+      pic_flight_time_total_make_model >= 700 & pic_flight_time_total_make_model < 1500 ~ "Alta",
+      pic_flight_time_total_make_model >= 1500 ~ "Muy alta", TRUE ~ NA_character_ 
+      )
+    )
+```
+
+
+Comprobamos la distribución de NAs
+
+
+```{r NA}
+na_counts_dplyr <- df_faa_clean %>%  
+  summarize(across(everything(), ~sum(is.na(.))))
+
+na_counts_dplyr_tibble <- na_counts_dplyr %>%  
+  pivot_longer(everything(), names_to = "Column", values_to = "NA_Count") %>%  
+  arrange(desc(NA_Count))
+
+na_counts_dplyr_tibble <- na_counts_dplyr_tibble %>%
+  mutate(Column = factor(Column, levels = Column))
+
+na_counts_dplyr_tibble %>%  
+  ggplot(aes(x = Column, y = NA_Count)) +  
+  geom_bar(stat = "identity", fill = "steelblue") +  
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +  # Rotate x-labels  
+  labs(title = "Number of NA Values per Column",  
+       x = "Column Name", y = "Total NA Count")
+```
+
+Necesitamos conocer algún dato sobre donde ha ocurrido el evento por lo que, al menos una de las variables relativas a la localización debe ser distinta de NA.
+
+```{r NA_Localización}
+df_faa_clean %>%
+  summarise(
+    nas_loc = sum(is.na(event_city) & is.na(event_state) & is.na(event_airport)),
+    porcentaje = mean(is.na(event_city) & is.na(event_state) & is.na(event_airport)) * 100
+  )
+```
+
+Necesitamos también conocer algún dato sobre la aeronave por lo que, procedemos igual que en el caso anterior.
+```{r NA_Aircraft}
+df_faa_clean %>%
+  summarise(
+    nas_loc = sum(is.na(aircraft_make) & is.na(aircraft_model) & is.na(aircraft_series)),
+    porcentaje = mean(is.na(aircraft_make) & is.na(aircraft_model) & is.na(aircraft_series)) * 100
+  )
+```
+Por último, comprobamos si existen casos donde desconocemos todos los datos relativos al motor.
+
+```{r NA_Aircraft_Engine}
+df_faa_clean %>%
+  summarise(
+    nas_loc = sum(is.na(aircraft_engine_make) & is.na(aircraft_engine_model) & is.na(engine_group_code)),
+    porcentaje = mean(is.na(aircraft_engine_make) & is.na(aircraft_engine_model) & is.na(engine_group_code)) * 100
+  )
+```
+El porcentaje de observaciones en las que no conocemos ningún dato de la localización es del 0.408. Es lo suficientemente bajo como para poder eliminar dichas observaciones.<br>
+En cuanto a los datos sobre la aeronave, los casos en los que desconocemos todos los datos son el 2.5%. Por lo que también vamos a eliminar estos datos.<br>
+Por último, los casos donde no conocemos ningun dato sobre el motor son más del 63% por lo que no se eliminarán.
+
+```{r limpieza_NA_Comunes}
+df_faa_clean <- df_faa_clean %>%
+  filter(!(is.na(event_city) & is.na(event_state) & is.na(event_airport)))
+
+df_faa_clean <- df_faa_clean %>%
+  filter(!(is.na(aircraft_make) & is.na(aircraft_model) & is.na(aircraft_series)))
+```
+
+```{r}
+
+df_faa_clean <- df_faa_clean %>%
+  mutate(
+    phase_group = case_when(
+
+      # -------------------------
+      # GROUND
+      # -------------------------
+      flight_phase %in% c(
+        "GROUND TAXI, OTHER AIRPLANE",
+        "ENGINE RUN-UP",
+        "STARTING ENGINES",
+        "OTHER GROUND OPERATIONS",
+        "OPERATIONS ON GROUND FROM LANDING/ROTORCRAFT",
+        "IDLING ENGINES",
+        "AERIAL TAXI, OTHER HELICOPTER",
+        "IDLING ROTORS",
+        "AERIAL TAXI TO TAKEOFF/ROTORCRAFT",
+        "OPERATIONS ON GROUND TO TAKEOFF/ROTORCRAFT",
+        "AERIAL TAXI FROM LANDING/ROTORCRAFT",
+        "TAXI",
+        "GROUND-RAMP",
+        "RUN-UP AREA"
+      ) ~ "GROUND",
+
+      # -------------------------
+      # TAKEOFF
+      # -------------------------
+      flight_phase %in% c(
+        "TAKEOFF GROUND ROLL",
+        "TO VERTICAL (HELICOPTER ONLY)",
+        "TO RUNNING(HELICOPTER/VERTICAL TAKEOFF AND LANDING AIRCRAFT)",
+        "TO ABORTED (FIXED WING)",
+        "TO ABORTED (COPIER/RUN TAKE OFF)",
+        "TAKEOFF-ABORT-COPTER VERTICAL",
+        "TAKEOFF",
+        "TAKEOFF: ROTATION"
+      ) ~ "TAKEOFF",
+
+      # -------------------------
+      # INITIAL CLIMB
+      # -------------------------
+      flight_phase %in% c(
+        "CLIMB",
+        "TO INITIAL CLIMB (1ST POWER REDUCTION)",
+        "TAKEOFF: DEPARTURE",
+        "TAKEOFF: CLIMB OUT",
+        "SIMULATED FORCED LANDING/TAKEOFF CLIMB"
+      ) ~ "INITIAL_CLIMB",
+
+      # -------------------------
+      # CRUISE / EN ROUTE
+      # -------------------------
+      flight_phase %in% c(
+        "NORMAL CRUISE",
+        "CRUISE-LEVEL FLIGHT",
+        "HOLDING INSTRUMENT FLIGHT RULES",
+        "FORMATION FLYING"
+      ) ~ "CRUISE",
+
+      # -------------------------
+      # DESCENT
+      # -------------------------
+      flight_phase %in% c(
+        "DESCENT",
+        "POWER ON DESCENT (ROTORCRAFT)",
+        "AUTOROT DESCENT (ROTORCRAFT)"
+      ) ~ "DESCENT",
+
+      # -------------------------
+      # APPROACH
+      # -------------------------
+      flight_phase %in% c(
+        "INITIAL APPROACH-INSTRUMENT FLIGHT RULES",
+        "FINAL APPROACH- INSTRUMENT FLIGHT RULES",
+        "FINAL APPROACH",
+        "IN TRAFFIC PATTERN-CIRCLING",
+        "LANDING: APPROACH",
+        "APPROACH",
+        "SIMULATED FORCED LANDING FINAL APPROACH",
+        "SIMULATED FORCED LANDING TRAFFIC PATTERN",
+        "FCD/PREC LDG FROM CRUISE"
+      ) ~ "APPROACH",
+
+      # -------------------------
+      # GO-AROUND / MISSED APPROACH
+      # -------------------------
+      flight_phase %in% c(
+        "MISSED APPROACH INSTRUMENT FLIGHT RULES",
+        "GO ROUND (ABORTED VISUAL FLIGHT RULES)",
+        "SIMULATED FORCED LANDING GO AROUND"
+      ) ~ "GO_AROUND",
+
+      # -------------------------
+      # LANDING
+      # -------------------------
+      flight_phase %in% c(
+        "LEVEL OFF TOUCHDOWN",
+        "TOUCH AND GO LANDING",
+        "FORCED LANDING",
+        "FORCED/PRECAUTIONARY LANDING",
+        "POWER ON VERTICAL LANDING/ROTORCRAFT",
+        "POWER ON RUN LANDING (ROTORCRAFT)",
+        "POWER OFF VERTICAL LANDING/AUTOROTATE",
+        "POWER OFF RUN LAND (AUTOROTATION)",
+        "ROLL-OUT (FIXED WING)",
+        "ROLL-OUT (ROTORCRAFT)",
+        "LANDING",
+        "LANDING: TOUCHDOWN",
+        "LANDING: ROLLOUT",
+        "SLOPE LANDING",
+        "PINNACLE LANDING"
+      ) ~ "LANDING",
+
+      # -------------------------
+      # MANEUVERING / SPECIAL OPS
+      # -------------------------
+      flight_phase %in% c(
+        "PRACTICE TRAINING MENEUVERS",
+        "LOW LEVEL OPERATIONS",
+        "UNAUTHORIZED LOW LEVEL OPERATIONS",
+        "HOVERING",
+        "HOVER-HOLDING",
+        "MANEUVER",
+        "PARACHUTE JUMPING",
+        "SCUD RUNNING",
+        "SETTLE WITH POWER (ROTORCRAFT)",
+        "SIMULATED FORCED LANDING CRUISE",
+        "SIMULATED FORCED LANDING/TAKEOFF",
+        "SIMULATED FORCED LANDING AUTOROTATION"
+      ) ~ "MANEUVERING",
+
+      # -------------------------
+      # UNKNOWN / OTHER
+      # -------------------------
+      flight_phase %in% c(
+        "UNKNOWN",
+        "OTHER-SPECIFY"
+      ) ~ "OTHER",
+
+      is.na(flight_phase) ~ NA_character_,
+
+      TRUE ~ "OTHER"
+    )
+  )
+```
+```{r mortalidad}
+phase_analysis <- df_faa_clean %>%
+  
+  group_by(phase_group) %>%
+  
+  summarise(
+    total_events = n(),
+    fatal_events = sum(fatal_event, na.rm = TRUE),
+    total_fatalities = sum(total_fatalities, na.rm = TRUE),
+    total_injuries = sum(total_injuries, na.rm = TRUE),
+  ) %>%
+  
+  ungroup()
+
+phase_analysis %>%
+  
+  filter(!is.na(phase_group)) %>%
+  
+  arrange(total_fatalities) %>%
+  
+  ggplot(
+    aes(
+      x = reorder(phase_group, total_fatalities),
+      y = total_fatalities,
+      fill = total_fatalities
+    )
+  ) +
+  
+  geom_col(width = 0.75) +
+  
+  coord_flip() +
+  
+  scale_fill_gradient(
+    low = "#90CAF9",
+    high = "#C62828"
+  ) +
+  
+  scale_y_continuous(
+    labels = comma_format()
+  ) +
+  
+  labs(
+    title = "Total Fatalities by Flight Phase Group",
+    x = NULL,
+    y = "Total fatalities",
+    fill = "Fatalities"
+  ) +
+  
+  theme_minimal(base_size = 13) +
+  
+  theme(
+    legend.position = "right",
+    panel.grid.major.y = element_blank()
+  )
+```
+
+
+Guardamos los datos para usarlos en la visualización.
+
+
+```{r}
+saveRDS(df_faa_clean, "../data/faa_incidents_limpios.rds")
+saveRDS(phase_analysis, "../data/faa_phase_analysis.rds")
+```
+

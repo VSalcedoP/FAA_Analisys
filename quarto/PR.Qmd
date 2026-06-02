@@ -1,0 +1,1848 @@
+---
+title: "Los Factores Detrás de los Incidentes Aéreos"
+subtitle: "Un análisis visual sobre aeronaves, operadores, fatalidades y fases críticas del vuelo"
+author: "Virgilio Salcedo Polo"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    css: styles.css
+    smooth-scroll: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+# ============================================
+# CONFIGURACIÓN INICIAL
+# ============================================
+if(!require(tidyverse)){install.packages("tidyverse")}; library("tidyverse")
+if(!require(plotly)){install.packages("plotly")}; library("plotly")
+if(!require(DT)){install.packages("DT")}; library("DT")
+if(!require(glue)){install.packages("glue")}; library("glue")
+if(!require(patchwork)){install.packages("patchwork")}; library("patchwork")
+if(!require(viridisLite)){install.packages("viridisLite")}; library("viridisLite")
+if(!require(reactable)){install.packages("reactable")}; library("reactable")
+if(!require(echarts4r)){install.packages("echarts4r")}; library("echarts4r")
+if(!require(scales)){install.packages("scales")}; library("scales")
+
+# Configuración global
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center"
+)
+
+
+# Resumen rápido de datos
+df_faa_clean <- readRDS("../data/faa_incidents_limpios.rds")
+df_phases <- readRDS("../data/faa_phase_analysis.rds")
+
+total_eventos <- nrow(df_faa_clean)
+total_fatal <- sum(df_faa_clean$fatal_event, na.rm = TRUE)
+porc_fatal <- round(total_fatal / total_eventos * 100, 1)
+min_year <- min(df_faa_clean$year)
+max_year <- max(df_faa_clean$year)
+top2_phases <- df_phases %>%
+  
+  filter(!is.na(phase_group)) %>%
+  
+  arrange(desc(total_events)) %>%
+  
+  slice(1:2) %>%
+  
+  mutate(
+    percentage = total_events / sum(df_phases$total_events) * 100
+  )
+top2_percentage <- df_phases %>%
+  
+  filter(!is.na(phase_group)) %>%
+  
+  arrange(desc(total_events)) %>%
+  
+  slice(1:2) %>%
+  
+  summarise(
+    combined_percentage = sum(total_events) / sum(df_phases$total_events) * 100
+  )
+top_2_incicent_perc <- top2_percentage %>%
+  
+  mutate(
+    combined_percentage = percent(
+      combined_percentage / 100,
+      accuracy = 0.1
+    )
+  )
+```
+
+
+<div style="display: flex; gap: 1rem; margin: 2rem 0; flex-wrap: wrap;"><div style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #1e3c72, #2a5298); padding: 1.5rem; border-radius: 10px; text-align: center; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"><div style="font-size: 0.85rem; opacity: 0.9;">Total incidentes</div><div style="font-size: 2rem; font-weight: bold;">`r total_eventos`</div><div style="font-size: 0.75rem; opacity: 0.8;">(`r min_year` - `r max_year`)</div></div><div style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #93291e, #ed213a); padding: 1.5rem; border-radius: 10px; text-align: center; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"><div style="font-size: 0.85rem; opacity: 0.9;">Incidentes con fatalidades</div><div style="font-size: 2rem; font-weight: bold;">`r total_fatal`</div><div style="font-size: 0.75rem; opacity: 0.8;">(`r porc_fatal`% del total)</div></div><div style="flex: 1; min-width: 180px; background: linear-gradient(135deg, #134e5e, #71b280); padding: 1.5rem; border-radius: 10px; text-align: center; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"><div style="font-size: 0.85rem; opacity: 0.9;">Fases críticas</div><div style="font-size: 1.5rem; font-weight: bold;">Aterrizaje<br>Aproximación</div><div style="font-size: 0.75rem; opacity: 0.8;">(`r top_2_incicent_perc`% del total)</div></div></div>
+
+<h2>La historia detrás de los datos</h2>
+<div style="text-align: justify;">
+La seguridad aérea suele asociarse con grandes accidentes, pero la mayoría de los incidentes ocurren mucho antes de llegar a ese extremo. Detrás de cada evento hay patrones relacionados con las aeronaves, los operadores, las fases del vuelo e incluso las condiciones operacionales más habituales.
+
+En este análisis exploramos los datos históricos de incidentes y accidentes recopilados por la FAA entre `r min_year` y `r max_year`. El objetivo es identificar en qué momentos del vuelo se concentran más sucesos, qué características comparten los accidentes con víctimas mortales y qué factores podrían ayudar a reducir el riesgo operativo.
+
+A lo largo de esta exploración veremos cómo determinados fabricantes, tipos de aeronave y operadores aparecen con mayor frecuencia en los registros, además de analizar qué fases del vuelo representan los momentos más críticos para la seguridad aérea.
+</div>
+
+<h2>Las aeronaves detrás de los incidentes</h2>
+
+```{r Modelos}
+top_makes <- df_faa_clean %>%
+  
+  count(aircraft_make, sort = TRUE) %>%
+  
+  slice_head(n = 6) %>%
+  
+  pull(aircraft_make)
+
+sunburst_data <- df_faa_clean %>%
+  filter(aircraft_make %in% top_makes) %>%
+  dplyr::count(
+    aircraft_make,
+    aircraft_model,
+    aircraft_series,
+    name = "incidents"
+  )
+
+# Nivel fabricante
+make_level <- sunburst_data %>%
+  group_by(aircraft_make) %>%
+  summarise(incidents = sum(incidents)) %>%
+  mutate(
+    ids = aircraft_make,
+    labels = aircraft_make,
+    parents = ""
+  )
+
+# Nivel modelo
+model_level <- sunburst_data %>%
+  group_by(aircraft_make, aircraft_model) %>%
+  summarise(incidents = sum(incidents), .groups = "drop") %>%
+  mutate(
+    ids = paste(aircraft_make, aircraft_model, sep = "-"),
+    labels = aircraft_model,
+    parents = aircraft_make
+  )
+
+# Nivel serie
+series_level <- sunburst_data %>%
+  mutate(
+    ids = paste(
+      aircraft_make,
+      aircraft_model,
+      aircraft_series,
+      sep = "-"
+    ),
+    
+    labels = aircraft_series,
+    
+    parents = paste(
+      aircraft_make,
+      aircraft_model,
+      sep = "-"
+    )
+  ) %>%
+  
+  select(ids, labels, parents, incidents)
+
+sunburst_final <- bind_rows(
+  make_level %>% select(ids, labels, parents, incidents),
+  model_level %>% select(ids, labels, parents, incidents),
+  series_level
+)
+
+plot_ly(
+  sunburst_final,
+  
+  ids = ~ids,
+  labels = ~labels,
+  parents = ~parents,
+  values = ~incidents,
+  
+  type = "sunburst",
+  
+  branchvalues = "total",
+  
+  hovertemplate =
+    paste(
+      "<b>%{label}</b><br>",
+      "Incidentes: %{value}<br>",
+      "<extra></extra>"
+    )
+) %>%
+  
+  layout(
+    title = list(
+      text = "",
+      x = 0.5
+    ),
+    
+    margin = list(t = 60, l = 0, r = 0, b = 0)
+  )
+
+
+```
+La mayoría de incidentes <b>64.2%</b> se reparten entre, únicamente, 4 marcas: CESSNA, PIPER, BEECH y BOING.<br>
+Sin embargo, ¿Tienen todos los incidentes la misma gravedad? ¿Hay modelos más inseguros? ¿Son los motores la pieza la clave?
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa;">
+<h3>¿Qué fabricantes deberían revisar sus programas de seguridad?</h3>
+```{r Fabricantes}
+#| fig-height: 3
+top_makes <- df_faa_clean %>%
+  count(aircraft_make, severity_level) %>%
+  filter(!is.na(aircraft_make), !is.na(severity_level)) %>%
+  group_by(aircraft_make) %>%
+  mutate(total = sum(n)) %>%
+  ungroup() %>%
+  slice_max(total, n = 10) %>%
+  arrange(total)
+
+plot_ly(top_makes, 
+        x = ~reorder(aircraft_make, total), 
+        y = ~n, 
+        color = ~severity_level,
+        colors = c("#FF9800", "#D32F2F", "#4CAF50"),
+        type = "bar",
+        text = ~n,
+        textposition = "auto") %>%
+  layout(title = "",
+         xaxis = list(title = ""),
+         yaxis = list(title = "Número de incidentes", type = "log"),
+         barmode = "stack")
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff;">
+<h3>El ranking que ningún fabricante quiere liderar</h3>
+
+
+```{r}
+#| fig-height: 3
+top_combinaciones <- df_faa_clean %>%
+  group_by(aircraft_make, aircraft_model, aircraft_series) %>%
+  summarise(
+    incidentes = n(),
+    fatales = sum(fatal_event, na.rm = TRUE),
+    con_lesiones = sum(injury_event & !fatal_event, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(incidentes)) %>%
+  slice_head(n = 5) %>%
+  mutate(
+    combinacion = paste(aircraft_make, aircraft_model, substr(aircraft_series, 1, 4),".", sep = " · "),
+
+    combinacion_ordenada = reorder(combinacion, incidentes)
+  )
+
+top_combinaciones_con_color <- top_combinaciones %>%
+  mutate(fabricante_color = aircraft_make)
+
+plot_ly(top_combinaciones_con_color,
+        x = ~incidentes,
+        y = ~combinacion_ordenada,
+        type = "bar",
+        orientation = "h",
+        color = ~aircraft_make,
+        colors = c("#377EFF", "#984EA3"),
+        text = ~paste("Fatal:",fatales, "|", "Total:",incidentes),
+        textposition = "none",
+        hoverinfo = "text",
+        showlegend = FALSE,
+        marker = list(line = list(color = "white", width = 1))) %>%
+  layout(title = "",
+         xaxis = list(title = "Número de incidentes"),
+         yaxis = list(title = ""),
+         margin = list(l = 100)
+         ) %>%
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa; text-align: justify;">
+CESSNA y BEECH acaparan el 94% de las víctimas mortales, aunque solo suman el 57% de los incidentes totales. Esto sugiere que no es solo la frecuencia, sino la gravedad de los eventos, lo que distingue a estos fabricantes.</b>
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff; text-align: justify;">
+El modelo CESSNA 172 encabeza la lista con 1.215 incidentes, pero el 152 lo supera en números brutos (2.459). La buena noticia: los PIPER PA28, a pesar de superar los 2.800 incidentes, registran cero víctimas mortales.
+</div><!-- -->
+</div>
+<!-- -->
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f3f8f3;">
+<h3>¿Más motores, más incidentes?</h3>
+
+```{r Motores 1}
+#| fig-height: 3
+df_motores_num <- df_faa_clean %>%
+  filter(!is.na(nbr_of_engines), !is.na(severity_level)) %>%
+  count(nbr_of_engines, severity_level) %>%
+  group_by(nbr_of_engines) %>%
+  mutate(prop = n / sum(n) * 100)
+
+plot_ly(df_motores_num,
+        x = ~factor(nbr_of_engines),
+        y = ~n,
+        color = ~severity_level,
+        colors = c("Fatal" = "#D32F2F", "Con lesiones" = "#FF9800", "Sin lesiones" = "#4CAF50"),
+        type = "bar",
+        text = ~n,
+        textposition = "auto",
+        hovertemplate = "<b>%{x} motor(es)</b><br>%{y} eventos<br>Tipo: %{color}<extra></extra>") %>%
+  layout(title = "",
+         xaxis = list(title = "Número de motores"),
+         yaxis = list(title = "Número de incidentes", type = "log"),
+         barmode = "stack",
+         legend = list(title = list(text = "Severidad"))) %>%
+  config(displaylogo = FALSE)
+
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#fff8ef;">
+<h3>¿Es el tipo de motor la clave?</h3>
+
+```{r Motores 2}
+#| fig-height: 4
+umbral <- 100
+
+df_motores_tipo <- df_faa_clean %>%
+  filter(!is.na(engine_group_code), !is.na(severity_level)) %>%
+  count(engine_group_code, severity_level) %>%
+  group_by(engine_group_code) %>%
+  mutate(total = sum(n)) %>%
+  ungroup() %>%
+  
+  filter(total >= umbral)
+
+plot_ly(df_motores_tipo,
+        x = ~reorder(engine_group_code, -total),
+        y = ~n,
+        color = ~severity_level,
+        colors = c("Fatal" = "#D32F2F", "Con lesiones" = "#FF9800", "Sin lesiones" = "#4CAF50"),
+        type = "bar",
+        text = ~n,
+        textposition = "auto",
+        hovertemplate = "<b>%{x}</b><br>%{y} eventos<br>Severidad: %{color}<extra></extra>") %>%
+  layout(title = "",
+         xaxis = list(title = "", tickangle = -45),
+         yaxis = list(title = "Número de incidentes", type = "log"),
+         barmode = "stack",
+         legend = list(
+           title = list(text = "Severidad"),
+           orientation = "h",
+           x = 0.5,
+           xanchor = "center",
+           y = -0.15,
+           yanchor = "top"
+         )) %>%
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f3f8f3; text-align: justify;">
+Cuatro de cada diez víctimas mortales viajaban en un avión monomotor. Los bimotores, aunque también sufren incidentes, multiplican por dos la protección frente a la fatalidad.
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#fff8ef; text-align: justify;">
+A diferencia del número de motores, el tipo específico de motor no muestra una tendencia clara. Hay motores con muchos incidentes (O320, O360, O520) pero también con cero víctimas mortales, lo que sugiere que el factor clave no es el modelo del motor, sino el contexto del vuelo.
+</div><!-- -->
+</div>
+<!-- -->
+<div style="padding: 0.8rem 1rem; margin: 1rem 0; border-left: 4px solid #2a5298; background-color: #f8f9fa; border-radius: 4px;text-align: justify;">
+Si el tipo de aeronave no explica por completo la gravedad de los sucesos, quizá la clave esté en otro lugar. El siguiente paso es analizar el momento del vuelo en que se producen los incidentes y comprobar si existen fases especialmente críticas.
+</div>
+<h2>Despegar, volar o aterrizar: ¿dónde está el mayor riesgo?</h2>
+Un mismo vuelo puede transcurrir sin contratiempos durante horas y complicarse en apenas unos minutos. Veamos qué fases concentran la mayor parte de los incidentes.
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa;">
+<h3>No todas las fases del vuelo son igual de problemáticas</h3>
+
+
+```{r Fases 1}
+#| fig-height: 3
+df_fases <- df_faa_clean %>%
+  filter(!is.na(phase_group)) %>%
+  group_by(phase_group) %>%
+  summarise(
+    Total_eventos = n(),
+    Fatales = sum(fatal_event),
+    `% Mortal` = round(mean(fatal_event) * 100, 2),
+    `Con lesiones` = sum(injury_event & !fatal_event),
+    `Sin lesiones` = sum(!injury_event & !fatal_event)
+  ) %>%
+  arrange(desc(Total_eventos))
+df_fases <- df_fases %>%
+  mutate(
+    size_fatal = sqrt(Fatales)
+  )
+
+plot_ly(
+  df_fases,
+  
+  x = ~Total_eventos,
+  y = ~reorder(phase_group, Total_eventos),
+  
+  type = "bar",
+  orientation = "h",
+  
+  marker = list(
+    color = "#377EFF"
+  ),
+  
+  hovertemplate = paste(
+    "<b>%{y}</b><br>",
+    "Incidentes: %{x:,}<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    xaxis = list(
+      title = "Número de incidentes"
+    ),
+    
+    yaxis = list(
+      title = ""
+    ),
+    
+    margin = list(l = 120)
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff;">
+<h3>Cuando el riesgo se convierte en tragedia</h3>
+
+
+```{r Fases 2}
+#| fig-height: 3
+df_fases_long <- df_fases %>%
+  mutate(
+    phase_group = reorder(phase_group, -Fatales)
+  ) %>%
+  select(
+    phase_group,
+    Fatales,
+    `Con lesiones`
+  ) %>%
+  pivot_longer(
+    cols = c(Fatales, `Con lesiones`),
+    names_to = "tipo",
+    values_to = "eventos"
+  )
+
+plot_ly(
+  df_fases_long,
+  
+  x = ~phase_group,
+  y = ~eventos,
+  
+  color = ~tipo,
+  
+  type = "bar",
+  
+  colors = c(
+    "#FF9800",
+    "#D32F2F"
+  ),
+  
+  hovertemplate = paste(
+    "<b>%{x}</b><br>",
+    "%{fullData.name}: %{y}<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    barmode = "group",
+    
+    title = "",
+    
+    xaxis = list(
+      title = "", tickangle = -45
+    ),
+    
+    yaxis = list(
+      title = "Número de eventos"
+    ),
+    
+    legend = list(
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = 1.15,
+      yanchor = "bottom",
+      title = list(text = "")
+      )
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa; text-align: justify;">
+Después de horas de vuelo sin contratiempos, es en los últimos minutos donde se concentra la mayor parte de los incidentes. Aproximación y aterrizaje representan el punto de máxima exigencia operativa para pilotos y aeronaves.
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff; text-align: justify;">
+Analizar la gravedad cambia el panorama. Las fases con más incidentes (aterrizaje y aproximación) no son las que más víctimas acumulan. El peligro real está en maniobras, crucero y descenso.
+</div><!-- -->
+</div>
+<!-- -->
+<div style="padding: 0.8rem 1rem; margin: 1rem 0; border-left: 4px solid #2a5298; background-color: #f8f9fa; border-radius: 4px; text-align: justify;">
+Saber dónde ocurren los incidentes es solo una parte de la historia. La otra parte tiene nombre y apellido: la persona que toma decisiones en cabina. Cuando el tiempo para reaccionar se mide en segundos, la experiencia del piloto puede convertirse en el factor más determinante de todos.
+</div>
+<h2>Más allá de la aeronave: el factor humano</h2>
+La aeronave y la fase del vuelo son importantes, pero no cuentan toda la historia. Cuando surge un problema, las decisiones tomadas en cabina pueden marcar la diferencia entre un incidente menor y un accidente grave.
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa;">
+<h3>No todos los pilotos vuelan en las mismas condiciones</h3>
+```{r PIC_Cert}
+#| fig-height: 3
+df_certificados <- df_faa_clean %>%
+  
+  filter(
+    !is.na(pic_certificate_type),
+    
+    !pic_certificate_type %in% c(
+      "SPECIAL PURPOSE",
+      "RECREATIONAL PILOT",
+      "PRIVATE PILOT FLIGHT INSTRUCTOR",
+      "PILOT NOT CERTIFICATED"
+    )
+  ) %>%
+  mutate(
+  pic_certificate_type = recode(
+    pic_certificate_type,
+    
+    "AIRLINE TRANSPORT" =
+      "A. Transport",
+    
+    "COMMERCIAL PILOT" =
+      "C. Pilot",
+    
+    "COMMERCIAL PILOT FLIGHT INSTRUCTOR" =
+      "C. Pilot + Instructor",
+    
+    "AIRLINE TRANSPORT PILOT FLIGHT INSTRUCTOR" =
+      "A. Transport + Instructor",
+    
+    "PRIVATE PILOT" =
+      "Private Pilot",
+    
+    "UNKNOWN/FOREIGN" =
+      "Unknown / Foreign"
+    )
+  ) %>%
+  
+  count(
+    pic_certificate_type,
+    sort = TRUE
+  ) %>%
+  
+  mutate(
+    porcentaje = round(n / sum(n) * 100, 1),
+    
+    pic_certificate_type = reorder(
+      pic_certificate_type,
+      n
+    )
+  )
+
+plot_ly(
+  df_certificados,
+  
+  x = ~n,
+  y = ~pic_certificate_type,
+  
+  type = "bar",
+  orientation = "h",
+  
+  marker = list(
+    color = "#377EFF"
+  ),
+  
+  customdata = ~porcentaje,
+  
+  hovertemplate = paste(
+    "<b>%{y}</b><br>",
+    "Incidentes: %{x:,}<br>",
+    "Porcentaje: %{customdata}%<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    xaxis = list(
+      title = "Número de incidentes"
+    ),
+    
+    yaxis = list(
+      title = ""
+    )
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff;">
+<h3>Cuando la experiencia entra en juego</h3>
+```{r PIC_horas_totales}
+#| fig-height: 3
+df_exp_long <- df_faa_clean %>%
+  
+  filter(!is.na(pic_experience_level)) %>%
+  
+  group_by(pic_experience_level) %>%
+  
+  summarise(
+    incidentes = n(),
+    Fatales = sum(fatal_event),
+    `Con lesiones` = sum(injury_event & !fatal_event),
+    .groups = "drop"
+  ) %>%
+  
+  mutate(
+    Fatales = round(Fatales / incidentes * 100, 2),
+    
+    `Con lesiones` = round(
+      `Con lesiones` / incidentes * 100,
+      2
+    )
+  ) %>%
+  
+  mutate(
+    pic_experience_level = factor(
+      pic_experience_level,
+      levels = c(
+        "Muy baja",
+        "Media",
+        "Alta",
+        "Muy alta"
+      )
+    )
+  ) %>%
+  
+  mutate(
+    pic_experience_level = reorder(
+      pic_experience_level,
+      -Fatales
+    )
+  ) %>%
+  
+  pivot_longer(
+    cols = c(Fatales, `Con lesiones`),
+    names_to = "tipo",
+    values_to = "porcentaje"
+  )
+
+plot_ly(
+  df_exp_long,
+  
+  x = ~porcentaje,
+  y = ~pic_experience_level,
+  
+  color = ~tipo,
+  
+  type = "bar",
+  orientation = "h",
+  
+  colors = c(
+    "#f39c12",
+    "#c0392b"
+  ),
+  
+  hovertemplate = paste(
+    "<b>%{y}</b><br>",
+    "%{fullData.name}: %{x:.2f}%<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    barmode = "group",
+    
+    legend = list(
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = 1.12
+    ),
+    
+    xaxis = list(
+      title = "% sobre el total de incidentes del grupo",
+      ticksuffix = "%"
+    ),
+    
+    yaxis = list(
+      title = ""
+    ),
+    
+    margin = list(
+      l = 100,
+      t = 40
+    )
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa; text-align: justify;">
+Los pilotos privados concentran el mayor número de incidentes, aunque esto parece estar más relacionado con su presencia en la actividad aérea que con un mayor riesgo. La clave está en analizar la gravedad de los sucesos y la experiencia acumulada.
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff; text-align: justify;">
+La experiencia no evita todos los incidentes, pero sí parece marcar la diferencia cuando algo sale mal, reduciendo la probabilidad de un desenlace fatal.
+</div><!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f3f8f3;">
+<h3>¿Quiénes sobreviven a los incidentes?</h3>
+```{r PIC_Horas_make_model_heridos}
+#| fig-height: 3
+df_heridos_modelo <- df_faa_clean %>%
+  
+  filter(
+    injury_event & !fatal_event,
+    !is.na(pic_experience_level_make_model)
+  ) %>%
+  
+  count(
+    pic_experience_level_make_model
+  ) %>%
+  
+  mutate(
+    pct = round(
+      n / sum(n) * 100,
+      1
+    )
+  ) %>%
+  
+  mutate(
+    pic_experience_level_make_model = factor(
+      pic_experience_level_make_model,
+      levels = c(
+        "Muy baja",
+        "Media",
+        "Alta",
+        "Muy alta"
+      )
+    )
+  ) %>%
+  
+  arrange(pic_experience_level_make_model)
+
+plot_ly(
+  df_heridos_modelo,
+  
+  labels = ~pic_experience_level_make_model,
+  values = ~n,
+  
+  type = "pie",
+  
+  hole = 0.65,
+  
+  sort = FALSE,
+  
+  textinfo = "percent",
+  
+  textposition = "inside",
+  
+  marker = list(
+    colors = c(
+      "#e8daef",
+      "#c39bd3",
+      "#8e44ad",
+      "#5b2c6f"
+    ),
+    
+    line = list(
+      color = "white",
+      width = 2
+    )
+  ),
+  
+  hovertemplate = paste(
+    "<b>%{label}</b><br>",
+    "Eventos con heridos: %{value:,}<br>",
+    "Porcentaje: %{percent}<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    showlegend = TRUE,
+    
+    legend = list(
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = -0.05
+    ),
+    
+    annotations = list(
+      list(
+        text = "HERIDOS",
+        x = 0.5,
+        y = 0.5,
+        showarrow = FALSE,
+        font = list(
+          size = 16
+        )
+      )
+    ),
+    
+    margin = list(
+      t = 10,
+      b = 40,
+      l = 10,
+      r = 10
+    )
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#fff8ef;">
+<h3>¿Quiénes protagonizan los desenlaces fatales?</h3>
+```{r PIC_Horas_make_model_fatal}
+#| fig-height: 3
+df_fatalidades_modelo <- df_faa_clean %>%
+  
+  filter(
+    fatal_event,
+    !is.na(pic_experience_level_make_model)
+  ) %>%
+  
+  count(
+    pic_experience_level_make_model
+  ) %>%
+  
+  mutate(
+    pct = round(
+      n / sum(n) * 100,
+      1
+    )
+  ) %>%
+  
+  mutate(
+    pic_experience_level_make_model = factor(
+      pic_experience_level_make_model,
+      levels = c(
+        "Muy baja",
+        "Media",
+        "Alta",
+        "Muy alta"
+      )
+    )
+  ) %>%
+  
+  arrange(pic_experience_level_make_model)
+
+plot_ly(
+  df_fatalidades_modelo,
+  
+  labels = ~pic_experience_level_make_model,
+  values = ~n,
+  
+  type = "pie",
+  
+  hole = 0.65,
+  
+  sort = FALSE,
+  
+  textinfo = "percent",
+  
+  textposition = "inside",
+  
+  marker = list(
+    colors = c(
+    "#e8daef",
+    "#c39bd3",
+    "#8e44ad",
+    "#5b2c6f"
+    ),
+    
+    line = list(
+      color = "white",
+      width = 2
+    )
+  ),
+  
+  hovertemplate = paste(
+    "<b>%{label}</b><br>",
+    "Fatalidades: %{value:,}<br>",
+    "Porcentaje: %{percent}<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    showlegend = TRUE,
+    
+    legend = list(
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = -0.05
+    ),
+    
+    annotations = list(
+      list(
+        text = "FATALIDADES",
+        x = 0.5,
+        y = 0.5,
+        showarrow = FALSE,
+        font = list(
+          size = 16
+        )
+      )
+    ),
+    
+    margin = list(
+      t = 10,
+      b = 40,
+      l = 10,
+      r = 10
+    )
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa; text-align: justify;  grid-column: span 2;">
+La experiencia en la aeronave parece marcar la diferencia cuando las consecuencias se agravan. Los pilotos con muy poca experiencia en el modelo concentran el 45% de los sucesos con heridos, pero su peso aumenta hasta el 58% en las fatalidades. En cambio, los pilotos con mayor familiaridad con la aeronave aparecen con frecuencia en incidentes con heridos, pero están claramente menos representados en los desenlaces fatales.
+</div><!-- -->
+</div>
+<!-- -->
+<div style="padding: 0.8rem 1rem; margin: 1rem 0; border-left: 4px solid #2a5298; background-color: #f8f9fa; border-radius: 4px; text-align: justify;">
+Los resultados sugieren que la experiencia, especialmente en la aeronave que se está pilotando, puede influir de forma decisiva en el desenlace de un incidente. Pero la formación y las horas de vuelo no dependen únicamente del piloto. Detrás de cada operación hay procedimientos, programas de entrenamiento y políticas de seguridad definidos por los operadores. La siguiente pregunta es inevitable: ¿todos los operadores obtienen los mismos resultados?
+</div>
+<h2>Detrás de cada vuelo hay una compañía</h2>
+Cada incidente tiene una aeronave, una fase de vuelo y un piloto. Pero detrás de todos ellos hay una organización responsable de que la operación funcione con seguridad.
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa;">
+<h3>¿El problema es el avión o quien lo opera?</h3>
+```{r Operadores_1}
+#| fig-height: 3
+df_operadores <- df_faa_clean %>%
+  
+  filter(
+    !is.na(operator)
+  ) %>%
+  
+  count(
+    operator,
+    name = "incidentes",
+    sort = TRUE
+  ) %>%
+  
+  slice_head(n = 10) %>%
+  
+  mutate(
+    operator = reorder(
+      operator,
+      incidentes
+    )
+  )
+plot_ly(
+  df_operadores,
+  
+  x = ~incidentes,
+  y = ~operator,
+  
+  type = "bar",
+  orientation = "h",
+  
+  marker = list(
+    color = "#377EFF"
+  ),
+  
+  hovertemplate = paste(
+    "<b>%{y}</b><br>",
+    "Incidentes: %{x:,}<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    xaxis = list(
+      title = "Número de incidentes"
+    ),
+    
+    yaxis = list(
+      title = ""
+    ),
+    
+    margin = list(
+      l = 100
+    ),
+    
+    showlegend = FALSE
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff;">
+<h3>Tener incidentes no es lo mismo que tener víctimas</h3>
+```{r Operadores_2}
+#| fig-height: 3
+df_operadores_scatter <- df_faa_clean %>%
+  
+  filter(
+    !is.na(operator)
+  ) %>%
+  
+  group_by(operator) %>%
+  
+  summarise(
+    incidentes = n(),
+    fatales = sum(fatal_event),
+    pct_fatal = round(mean(fatal_event) * 100, 2),
+    .groups = "drop"
+  ) %>%
+  
+  filter(
+    incidentes >= 100,
+    fatales>0
+  )%>%
+  
+  slice_head(n = 10)
+
+plot_ly(
+  df_operadores_scatter,
+  
+  x = ~incidentes,
+  y = ~pct_fatal,
+  
+  type = "scatter",
+  mode = "markers",
+  
+  size = ~fatales*2,
+  
+  sizes = c(10,40),
+  
+  text = ~operator,
+  
+  marker = list(
+    color = ~pct_fatal,
+    colorscale = "Reds",
+    colorbar = list(
+      title = "% Fatal",
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = 1.05,
+      yanchor = "bottom",
+      len = 1,
+      thickness = 15
+    ),
+    sizemode = "diameter"
+  ),
+  
+  customdata = ~fatales,
+  
+  hovertemplate = paste(
+    "<b>%{text}</b><br>",
+    "Incidentes: %{x:,}<br>",
+    "Fatalidades: %{customdata}<br>",
+    "% Mortal: %{y:.2f}%<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    xaxis = list(
+      title = "Número de incidentes"
+    ),
+    
+    yaxis = list(
+      title = "% de incidentes fatales"
+    ),
+    
+    showlegend = FALSE
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa; text-align: justify;">
+Los resultados están dominados por un reducido grupo de grandes aerolíneas. Esto no implica necesariamente un mayor riesgo, sino que refleja el enorme volumen de operaciones que gestionan cada día.
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff; text-align: justify;">
+El número de incidentes cuenta solo una parte de la historia. Cuando observamos cuántos de ellos terminan siendo fatales, algunas compañías pierden protagonismo mientras otras pasan a ocupar posiciones más destacadas.
+</div><!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f3f8f3; grid-column: span 2;">
+<h3>La diferencia entre un susto y una tragedia</h3>
+```{r Operadores_3}
+#| fig-height: 2.5
+
+df_operadores_gravedad <- df_faa_clean %>%
+  
+  filter(
+    !is.na(operator)
+  ) %>%
+  
+  group_by(operator) %>%
+  
+  summarise(
+    Fatales = sum(fatal_event),
+    
+    Heridos = sum(
+      injury_event & !fatal_event
+    ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  mutate(
+    Consecuencias = Fatales + Heridos
+  ) %>%
+  
+  filter(
+    Consecuencias >= 50
+  ) %>%
+  
+  mutate(
+    pct_fatal = round(
+      Fatales / Consecuencias * 100,
+      1
+    ),
+    
+    pct_heridos = round(
+      Heridos / Consecuencias * 100,
+      1
+    )
+  ) %>%
+  
+  arrange(desc(pct_fatal)) %>%
+  
+  slice_head(n = 7) %>%
+  
+  mutate(
+    operator = factor(
+      operator,
+      levels = rev(operator)
+    )
+  )
+
+p <- plot_ly()
+
+
+p <- p %>%
+  add_segments(
+    data = df_operadores_gravedad,
+    
+    x = ~pct_fatal,
+    xend = ~pct_heridos,
+    
+    y = ~operator,
+    yend = ~operator,
+    
+    line = list(
+      color = "lightgrey",
+      width = 3
+    ),
+    
+    hoverinfo = "none",
+    showlegend = FALSE
+  )
+
+
+p <- p %>%
+  add_markers(
+    data = df_operadores_gravedad,
+    
+    x = ~pct_fatal,
+    y = ~operator,
+    
+    name = "Fatalidades",
+    
+    marker = list(
+      color = "#c0392b",
+      size = 12
+    ),
+    
+    hovertemplate = paste(
+      "<b>%{y}</b><br>",
+      "Fatalidades: %{x:.1f}%<br>",
+      "<extra></extra>"
+    )
+  )
+
+
+p <- p %>%
+  add_markers(
+    data = df_operadores_gravedad,
+    
+    x = ~pct_heridos,
+    y = ~operator,
+    
+    name = "Heridos",
+    
+    marker = list(
+      color = "#f39c12",
+      size = 12
+    ),
+    
+    hovertemplate = paste(
+      "<b>%{y}</b><br>",
+      "Heridos: %{x:.1f}%<br>",
+      "<extra></extra>"
+    )
+  )
+
+p %>%
+  
+  layout(
+    title = "",
+    
+    legend = list(
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = 1.12
+    ),
+    
+    xaxis = list(
+      title = "% de eventos con consecuencias",
+      ticksuffix = "%"
+    ),
+    
+    yaxis = list(
+      title = ""
+    ),
+    
+    margin = list(
+      l = 180,
+      t = 40
+    )
+  ) %>%
+  
+  config(displaylogo = FALSE)
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f3f8f3; text-align: justify;  grid-column: span 2;">Cuando el incidente tiene consecuencias, el desenlace cambia ligeramente entre operadores. Sin embargo, no aparecen diferencias extremas: en todos los casos, las lesiones son mucho más frecuentes que las víctimas mortales.
+</div><!-- -->
+</div>
+<!-- -->
+<div style="padding: 0.8rem 1rem; margin: 1rem 0; border-left: 4px solid #2a5298; background-color: #f8f9fa; border-radius: 4px; text-align: justify;">Pilotos, fases, aeronaves y operadores explican parte del riesgo, pero todavía falta una pieza clave del contexto: el lugar. El último paso es observar dónde se producen los incidentes y comprobar si existen patrones geográficos que ayuden a entender mejor su distribución.
+</div>
+
+<h2>La geografía de los incidentes</h2>
+Los incidentes aéreos no se distribuyen de forma homogénea sobre el territorio. Factores como la densidad del tráfico, las condiciones operativas o la concentración de infraestructuras pueden hacer que determinadas zonas acumulen más eventos que otras.
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa; grid-column: span 2;">
+<h3>Cuando el mapa empieza a hablar</h3>
+```{r localizacion_1}
+#| fig-height: 4
+df_estados <- df_faa_clean %>%
+  
+  filter(
+    !is.na(event_state)
+  ) %>%
+  
+  group_by(event_state) %>%
+  
+  summarise(
+    incidentes = n(),
+    
+    heridos = sum(
+      injury_event & !fatal_event
+    ),
+    
+    fatalidades = sum(
+      fatal_event
+    ),
+    
+    pct_mortal = round(
+      mean(fatal_event) * 100,
+      2
+    ),
+    
+    .groups = "drop"
+  )
+state_lookup <- data.frame(
+  event_state = state.abb,
+  state_name = state.name
+)
+
+df_estados <- df_estados %>%
+  left_join(
+    state_lookup,
+    by = "event_state"
+  )
+
+# Escalas de color
+blues <- list(
+  c(0, "#deebf7"),
+  c(1, "#08519c")
+)
+
+oranges <- list(
+  c(0, "#feedde"),
+  c(1, "#d94801")
+)
+
+reds <- list(
+  c(0, "#fee5d9"),
+  c(1, "#a50f15")
+)
+
+fig <- plot_ly(
+  df_estados,
+  
+  type = "choropleth",
+  
+  locationmode = "USA-states",
+  
+  locations = ~event_state,
+  
+  z = ~incidentes,
+  
+  colorscale = blues,
+  
+  colorbar = list(
+    thickness = 12,
+    title = ""
+  ),
+  
+  customdata = ~state_name,
+  
+  hovertemplate = paste(
+    "<b>%{customdata}</b><br>",
+    "Incidentes: %{z:,}<br>",
+    "<extra></extra>"
+  )
+)
+
+fig <- fig %>%
+  
+  layout(
+    
+    updatemenus = list(
+      list(
+        type = "buttons",
+        
+        direction = "right",
+        
+        x = 0.5,
+        xanchor = "center",
+        
+        y = 1.15,
+        
+        buttons = list(
+          
+          list(
+            label = "Incidentes",
+            method = "restyle",
+            args = list(
+              list(
+                z = list(df_estados$incidentes),
+                colorscale = list(blues)
+              )
+            )
+          ),
+          
+          list(
+            label = "Heridos",
+            method = "restyle",
+            args = list(
+              list(
+                z = list(df_estados$heridos),
+                colorscale = list(oranges)
+              )
+            )
+          ),
+          
+          list(
+            label = "Fatalidades",
+            method = "restyle",
+            args = list(
+              list(
+                z = list(df_estados$fatalidades),
+                colorscale = list(reds)
+              )
+            )
+          ),
+          
+          list(
+            label = "% Mortalidad",
+            method = "restyle",
+            args = list(
+              list(
+                z = list(df_estados$pct_mortal),
+                colorscale = list(reds)
+              )
+            )
+          )
+          
+        )
+      )
+    ),
+    
+    geo = list(
+      scope = "usa"
+    )
+  )
+
+fig
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#f5f7fa; text-align: justify; grid-column: span 2;">
+A primera vista, el mapa parece reflejar simplemente dónde existe más actividad aérea. Sin embargo, al alternar entre volumen y gravedad, aparecen matices que no son evidentes en un primer vistazo. Los lugares con más incidentes no son necesariamente aquellos donde las consecuencias resultan más graves.
+</div>
+<!-- -->
+
+<div style="padding:1rem; border-radius:10px; background:#eef6ff;">
+<h3>Las Ciudades con Más Vidas Perdidas</h3>
+```{r localizacion_2}
+#| fig-height: 3.5
+df_ciudades <- df_faa_clean %>%
+  
+  filter(
+    !is.na(event_city),
+    !is.na(event_state)
+  ) %>%
+  
+  group_by(
+    event_city,
+    event_state
+  ) %>%
+  
+  summarise(
+    incidentes = n(),
+    
+    heridos = sum(
+      injury_event & !fatal_event
+    ),
+    
+    fatalidades = sum(
+      fatal_event
+    ),
+    
+    pct_mortal = round(
+      mean(fatal_event) * 100,
+      2
+    ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  filter(
+    incidentes >= 20
+  )
+
+df_ciudades_1 <- df_ciudades %>%
+  
+  slice_max(
+    fatalidades,
+    n = 10
+  ) %>%
+  slice_head(
+    n = 8
+  ) %>%
+  mutate(
+    event_city = paste(
+      event_city,
+      event_state,
+      sep = ", "
+    )
+  ) %>%
+  
+  arrange(fatalidades) %>%
+  
+  mutate(
+    event_city = factor(
+      event_city,
+      levels = event_city
+    )
+  )
+
+plot_ly(df_ciudades_1) %>%
+  
+  add_segments(
+    x = 0,
+    xend = ~incidentes,
+    y = ~event_city,
+    yend = ~event_city,
+    
+    line = list(
+      color = "#d9d9d9",
+      width = 2
+    ),
+    
+    hoverinfo = "none"
+  ) %>%
+  
+  add_markers(
+    x = ~incidentes,
+    y = ~event_city,
+    
+    name = "",
+    showlegend = FALSE,
+    
+    marker = list(
+      size = ~incidentes / max(incidentes) * 20 + 6,
+      color = ~fatalidades,
+      colorscale = list(
+        c(0, "#fee5d9"),
+        c(1, "#a50f15")
+      ),
+      showscale = TRUE,
+      colorbar = list(
+        title = "Fatalidades",
+        
+        orientation = "h",
+        
+        x = 0.5,
+        xanchor = "center",
+        
+        y = 1.15,
+        
+        len = 1,
+        
+        thickness = 15
+      )
+    ),
+    
+    hovertemplate = paste(
+      "<b>%{y}</b><br>",
+      "Incidentes: %{x:,}<br>",
+      "Fatalidades: %{marker.color}<br>",
+      "<extra></extra>"
+    )
+  ) %>%
+  
+  layout(
+    xaxis = list(title = "Incidentes"),
+    yaxis = list(title = ""),
+    margin = list(l = 50)
+  )
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff;">
+<h3>El Riesgo Oculto</h3>
+```{r localizacion_22}
+#| fig-height: 3.5
+df_ciudades_2 <- df_ciudades %>%
+  
+  filter(
+    incidentes >= 600
+  ) %>%
+  slice_head(
+    n = 8
+  ) %>%
+  mutate(
+    event_city = paste(
+      event_city,
+      event_state,
+      sep = ", "
+    )
+  ) %>%
+  
+  arrange(incidentes) %>%
+  
+  mutate(
+    event_city = factor(
+      event_city,
+      levels = event_city
+    )
+  )
+
+plot_ly(df_ciudades_2) %>%
+  
+  add_segments(
+    x = 0,
+    xend = ~incidentes,
+    y = ~event_city,
+    yend = ~event_city,
+    
+    line = list(
+      color = "#d9d9d9",
+      width = 2
+    ),
+    
+    hoverinfo = "none"
+  ) %>%
+  
+  add_markers(
+    x = ~incidentes,
+    y = ~event_city,
+    
+    name = "",
+    showlegend = FALSE,
+    
+    marker = list(
+      size = ~incidentes / max(incidentes) * 20 + 6,
+      color = ~fatalidades,
+      colorscale = list(
+        c(0, "#fee5d9"),
+        c(1, "#a50f15")
+      ),
+      showscale = TRUE,
+      colorbar = list(
+        title = "% Fat./Inc.",
+        orientation = "h",
+        x = 0.5,
+        xanchor = "center",
+        y = 1.05,
+        yanchor = "bottom",
+        len = 1,
+        thickness = 15
+      )
+    ),
+    
+    hovertemplate = paste(
+      "<b>%{y}</b><br>",
+      "Incidentes: %{x:,}<br>",
+      "Fatalidades: %{marker.color}<br>",
+      "<extra></extra>"
+    )
+  ) %>%
+  
+  layout(
+    xaxis = list(
+      title = "Incidentes"
+    ),
+    
+    yaxis = list(
+      title = ""
+    ),
+    
+    margin = list(
+      l = 50,
+      t = 10
+    )
+  )
+```
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#eef6ff; text-align: justify;  grid-column: span 2;">Dos caras del riesgo: las ciudades con más fatalidades (Perris, Eloy) tienen pocos incidentes pero son extremadamente letales (>40%). Las grandes ciudades (Chicago, Houston) acumulan cientos de incidentes pero casi ninguna fatalidad. El peligro no está donde parece.
+</div>
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#fff8ef;grid-column: span 2;">
+<h3>La actividad y la letalidad no siempre van de la mano</h3>
+```{r}
+#| fig-height: 3.5
+df_airports <- df_faa_clean %>%
+  
+  filter(
+    !is.na(event_airport)
+  ) %>%
+  
+  group_by(
+    event_airport
+  ) %>%
+  
+  summarise(
+    
+    incidentes = n(),
+    
+    fatalidades = sum(
+      fatal_event,
+      na.rm = TRUE
+    ),
+    
+    pct_mortal = round(
+      100 * fatalidades / incidentes,
+      2
+    ),
+    
+    .groups = "drop"
+    
+  ) %>%
+  
+  filter(
+    incidentes >= 20
+  ) %>%
+  
+  slice_max(
+    fatalidades,
+    n = 10,
+    with_ties = FALSE
+  ) %>%
+  
+  arrange(
+    desc(fatalidades)
+  ) %>%
+  
+  mutate(
+    
+    airport_label = ifelse(
+      nchar(event_airport) > 20,
+      paste0(
+        substr(event_airport, 1, 20),
+        "..."
+      ),
+      event_airport
+    ),
+    
+    airport_label = factor(
+      airport_label,
+      levels = airport_label
+    )
+    
+  )
+
+plot_ly(df_airports) %>%
+  
+  add_bars(
+  
+  x = ~airport_label,
+  
+  y = ~fatalidades,
+  
+  hovertext = ~paste0(
+    "<b>", event_airport, "</b><br>",
+    "Fatalidades: ", fatalidades, "<br>",
+    "Incidentes: ", incidentes, "<br>",
+    "% Mortalidad: ", pct_mortal, "%"
+  ),
+  
+  hoverinfo = "text",
+  
+  marker = list(
+    
+    color = ~pct_mortal,
+    
+    colorscale = list(
+      c(0, "#fee5d9"),
+      c(0.5, "#fc9272"),
+      c(1, "#a50f15")
+    ),
+    
+    showscale = TRUE,
+    
+    colorbar = list(
+      title = "% Mortalidad",
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = 1.05,
+      len = 1,
+      thickness = 15
+    )
+  )
+) %>%
+  
+  layout(
+    
+    xaxis = list(
+      title = "",
+      tickangle = -45
+    ),
+    
+    yaxis = list(
+      title = "Fatalidades"
+    ),
+    
+    bargap = 0.6,
+    
+    showlegend = FALSE,
+    
+    margin = list(
+      l = 60,
+      r = 20,
+      b = 100,
+      t = 20
+    )
+    
+  )
+```
+</div>
+
+
+<!-- -->
+<div style="padding:1rem; border-radius:10px; background:#fff8ef; text-align: justify; grid-column: span 2;">Aunque los grandes aeropuertos concentran una mayor actividad operativa, los mayores niveles de letalidad se observan en instalaciones mucho más pequeñas. Esto sugiere que el volumen de incidentes, por sí solo, no explica la gravedad de sus consecuencias.
+</div>
+<!-- -->
+</div>
+
+<h2>Cuando todas las piezas encajan</h2>
+<div style="text-align: justify; padding:1rem; border-radius:10px; background:#f3f8f3;">
+Aeronaves, fases de vuelo, pilotos, operadores y localizaciones. A primera vista parecen elementos independientes, pero el análisis muestra que forman parte de un mismo puzzle. El número de incidentes cuenta solo una parte de la historia: los mayores niveles de riesgo no siempre aparecen donde ocurren más sucesos, sino donde sus consecuencias son más graves.<br>
+
+La gravedad de los sucesos parece estar más relacionada con factores como la experiencia del piloto, la fase del vuelo y el contexto operativo que con una característica técnica aislada de la aeronave.<br>
+
+Además, los resultados muestran que algunos aeropuertos y ciudades con pocos incidentes presentan niveles de letalidad significativamente superiores a los observados en entornos con una actividad mucho más intensa.<br>
+
+<b><span style="color: #E74C3C; font-style: italic;">En definitiva, la seguridad aérea no depende únicamente de reducir el número de incidentes, sino de minimizar la probabilidad de que sus consecuencias se conviertan en una tragedia.</span></b>
+</div>
+<!-- -->
+<h2>Del análisis a la acción</h2>
+
+<div style="display: flex; gap: 1rem; margin: 1.5rem 0; flex-wrap: wrap;">
+
+<div style="flex: 1; background: #e8f4f8; padding: 1rem; border-radius: 10px; text-align: justify;">
+  <strong>Reforzar la formación específica en cada aeronave</strong><br>
+  La experiencia en el modelo operado aparece asociada a una menor presencia de desenlaces fatales. Incrementar la familiarización con la aeronave puede reducir el impacto de situaciones imprevistas.
+</div>
+
+<div style="flex: 1; background: #e8f4f8; padding: 1rem; border-radius: 10px; text-align: justify;">
+  <strong>Priorizar el entrenamiento en fases críticas del vuelo</strong><br>
+  Aproximación, aterrizaje y determinadas maniobras concentran una parte importante del riesgo operativo. La formación debería prestar especial atención a la gestión de estas situaciones.
+</div>
+
+</div>
+
+<div style="display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap;">
+
+<div style="flex: 1; background: #e8f4f8; padding: 1rem; border-radius: 10px; text-align: justify;">
+  <strong>Complementar los indicadores de frecuencia con indicadores de gravedad</strong><br>
+  El número de incidentes ofrece una visión incompleta del riesgo. Incorporar métricas de fatalidad y letalidad permite identificar mejor las áreas donde las consecuencias son más severas.
+</div>
+
+<div style="flex: 1; background: #e8f4f8; padding: 1rem; border-radius: 10px;text-align: justify;">
+  <strong>Analizar entornos con alta letalidad relativa</strong><br>
+  Algunas ciudades y aeropuertos presentan pocos incidentes pero una elevada proporción de víctimas mortales. Estos casos merecen un análisis específico para comprender qué factores están detrás de esa diferencia.
+</div>
+
+</div>
+
+<div style="text-align:center; margin-top:40px;">
+  <span style="font-size:22px; font-weight:bold; color:#E74C3C;">
+    El riesgo no siempre está donde ocurren más incidentes,
+    sino donde sus consecuencias son más graves.
+  </span>
+</div>
