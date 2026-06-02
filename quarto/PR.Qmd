@@ -1821,7 +1821,7 @@ Además, los resultados muestran que algunos aeropuertos y ciudades con pocos in
 
 <div style="flex: 1; background: #e8f4f8; padding: 1rem; border-radius: 10px; text-align: justify;">
   <strong>Priorizar el entrenamiento en fases críticas del vuelo</strong><br>
-  Aproximación, aterrizaje y determinadas maniobras concentran una parte importante del riesgo operativo. La formación debería prestar especial atención a la gestión de estas situaciones.
+  Aproximación y aterrizaje concentran una parte importante del riesgo pero, las que pueden tener consecuencias más graves son maniobras, crucero y descenso. La formación debería prestar especial atención a la gestión de estas situaciones.
 </div>
 
 </div>
