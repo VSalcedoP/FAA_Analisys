@@ -35,7 +35,7 @@ El proyecto ha sido realizado en R-Studio+Quarto
   
 
 #### <ins>Descripción del proyecto</ins> ####
-Esta PEC se corresponde con la práctica de la asignatura de "Visualizacón de datos" del master "Ciencia de Datos" de la UOC.
+Esta PEC se corresponde con la práctica de la asignatura de "Visualización de datos" del master "Ciencia de Datos" de la UOC.
 Su objetivo es crear una visualización sobre incidentes aereos en base a datos proporcionados por la FAA que, permita responder a las siguientes preguntas:
 - ¿Cuáles son las características de las aeronaves involucradas en los accidentes e incidentes? Analiza la distribución por fabricante (Aircraft Make), modelo (Aircraft Model), número de motores (Nbr of Engines) y tipo de motor (Engine Group Code).
 - ¿En qué fases del vuelo (Flight Phase) se producen más accidentes e incidentes?
