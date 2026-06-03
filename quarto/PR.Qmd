@@ -288,21 +288,59 @@ df_motores_num <- df_faa_clean %>%
   group_by(nbr_of_engines) %>%
   mutate(prop = n / sum(n) * 100)
 
-plot_ly(df_motores_num,
-        x = ~factor(nbr_of_engines),
-        y = ~n,
-        color = ~severity_level,
-        colors = c("Fatal" = "#D32F2F", "Con lesiones" = "#FF9800", "Sin lesiones" = "#4CAF50"),
-        type = "bar",
-        text = ~n,
-        textposition = "auto",
-        hovertemplate = "<b>%{x} motor(es)</b><br>%{y} eventos<br>Tipo: %{color}<extra></extra>") %>%
-  layout(title = "",
-         xaxis = list(title = "Número de motores"),
-         yaxis = list(title = "Número de incidentes", type = "log"),
-         barmode = "stack",
-         legend = list(title = list(text = "Severidad"))) %>%
-  config(displaylogo = FALSE)
+plot_ly(
+  df_motores_num,
+  
+  x = ~factor(nbr_of_engines),
+  y = ~n,
+  
+  color = ~severity_level,
+  
+  customdata = ~severity_level,
+  
+  colors = c(
+    "Fatal" = "#D32F2F",
+    "Con lesiones" = "#FF9800",
+    "Sin lesiones" = "#4CAF50"
+  ),
+  
+  type = "bar",
+  
+  text = ~n,
+  textposition = "auto",
+  
+  hovertemplate = paste(
+    "<b>%{x} motor(es)</b><br>",
+    "Eventos: %{y}<br>",
+    "Severidad: %{customdata}<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    title = "",
+    
+    xaxis = list(
+      title = "Número de motores"
+    ),
+    
+    yaxis = list(
+      title = "Número de incidentes",
+      type = "log"
+    ),
+    
+    barmode = "stack",
+    
+    legend = list(
+      title = list(
+        text = "Severidad"
+      )
+    )
+  ) %>%
+  
+  config(
+    displaylogo = FALSE
+  )
 
 ```
 </div>
@@ -323,28 +361,64 @@ df_motores_tipo <- df_faa_clean %>%
   
   filter(total >= umbral)
 
-plot_ly(df_motores_tipo,
-        x = ~reorder(engine_group_code, -total),
-        y = ~n,
-        color = ~severity_level,
-        colors = c("Fatal" = "#D32F2F", "Con lesiones" = "#FF9800", "Sin lesiones" = "#4CAF50"),
-        type = "bar",
-        text = ~n,
-        textposition = "auto",
-        hovertemplate = "<b>%{x}</b><br>%{y} eventos<br>Severidad: %{color}<extra></extra>") %>%
-  layout(title = "",
-         xaxis = list(title = "", tickangle = -45),
-         yaxis = list(title = "Número de incidentes", type = "log"),
-         barmode = "stack",
-         legend = list(
-           title = list(text = "Severidad"),
-           orientation = "h",
-           x = 0.5,
-           xanchor = "center",
-           y = -0.15,
-           yanchor = "top"
-         )) %>%
-  config(displaylogo = FALSE)
+plot_ly(
+  df_motores_tipo,
+  
+  x = ~reorder(engine_group_code, -total),
+  y = ~n,
+  
+  color = ~severity_level,
+  
+  customdata = ~severity_level,
+  
+  colors = c(
+    "Fatal" = "#D32F2F",
+    "Con lesiones" = "#FF9800",
+    "Sin lesiones" = "#4CAF50"
+  ),
+  
+  type = "bar",
+  
+  text = ~n,
+  textposition = "auto",
+  
+  hovertemplate = paste(
+    "<b>%{x}</b><br>",
+    "Eventos: %{y}<br>",
+    "Severidad: %{customdata}<br>",
+    "<extra></extra>"
+  )
+) %>%
+  
+  layout(
+    
+    title = "",
+    
+    xaxis = list(
+      title = "",
+      tickangle = -45
+    ),
+    
+    yaxis = list(
+      title = "Número de incidentes",
+      type = "log"
+    ),
+    
+    barmode = "stack",
+    
+    legend = list(
+      title = list(text = "Severidad"),
+      orientation = "h",
+      x = 0.5,
+      xanchor = "center",
+      y = -0.15,
+      yanchor = "top"
+    )
+  ) %>%
+  
+  config(
+    displaylogo = FALSE
+  )
 ```
 </div>
 <!-- -->
@@ -1107,6 +1181,8 @@ Los resultados están dominados por un reducido grupo de grandes aerolíneas. Es
 <div style="padding:1rem; border-radius:10px; background:#eef6ff; text-align: justify;">
 El número de incidentes cuenta solo una parte de la historia. Cuando observamos cuántos de ellos terminan siendo fatales, algunas compañías pierden protagonismo mientras otras pasan a ocupar posiciones más destacadas.
 </div><!-- -->
+
+
 <div style="padding:1rem; border-radius:10px; background:#f3f8f3; grid-column: span 2;">
 <h3>La diferencia entre un susto y una tragedia</h3>
 ```{r Operadores_3}
